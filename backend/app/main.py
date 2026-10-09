@@ -12,6 +12,7 @@ from app.contests.routes import router as contests_router
 from app.exams.routes import router as exams_router
 from app.sync.routes import router as sync_router
 from app.whiteboard.routes import router as whiteboard_router
+from app.notes.routes import router as notes_router
 
 
 @asynccontextmanager
@@ -54,6 +55,7 @@ app.include_router(contests_router, prefix="/api")
 app.include_router(exams_router, prefix="/api")
 app.include_router(sync_router, prefix="/api")
 app.include_router(whiteboard_router, prefix="/api")
+app.include_router(notes_router, prefix="/api")
 
 
 @app.get("/api/health", tags=["Health"])

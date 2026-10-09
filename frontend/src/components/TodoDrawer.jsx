@@ -25,17 +25,20 @@ export default function TodoDrawer({ isOpen, onClose, onTodoUpdated }) {
       if (filterPriority) params.priority = filterPriority;
 
       const data = await api.getTodos(params);
-      setTodos(data);
+      setTodos(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load todos:', err);
+      setTodos([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadTodos();
-  }, [filterStatus, filterPriority]);
+    if (isOpen) {
+      loadTodos();
+    }
+  }, [isOpen, filterStatus, filterPriority]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -87,7 +90,8 @@ export default function TodoDrawer({ isOpen, onClose, onTodoUpdated }) {
   };
 
   const getPriorityBadge = (p) => {
-    switch (p) {
+    const norm = (p || 'medium').toLowerCase();
+    switch (norm) {
       case 'high':
         return (
           <span
@@ -375,13 +379,11 @@ export default function TodoDrawer({ isOpen, onClose, onTodoUpdated }) {
                   }}
                   onClick={() => handleToggle(todo)}
                 >
-                  <button
-                    type="button"
+                  <span
                     style={{
                       background: 'transparent',
                       border: 'none',
                       padding: 0,
-                      cursor: 'pointer',
                       color: todo.completed ? 'var(--easy-color)' : 'var(--text-muted)',
                       display: 'flex',
                       alignItems: 'center',
@@ -389,7 +391,7 @@ export default function TodoDrawer({ isOpen, onClose, onTodoUpdated }) {
                     }}
                   >
                     {todo.completed ? <CheckSquare size={17} /> : <Square size={17} />}
-                  </button>
+                  </span>
 
                   <div style={{ flex: 1 }}>
                     <div

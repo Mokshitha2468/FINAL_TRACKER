@@ -1,54 +1,55 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import rough from 'roughjs';
 import {
   ArrowLeft,
-  Pen,
-  Eraser,
   MousePointer,
-  Type,
   Square,
+  Diamond,
   Circle,
-  Minus,
   MoveRight,
+  Minus,
+  Pen,
+  Type,
+  Eraser,
   Hand,
-  Image as ImageIcon,
   RotateCcw,
   RotateCw,
   ZoomIn,
   ZoomOut,
-  Maximize2,
   Save,
-  Plus,
-  Trash2,
-  Edit2,
-  Check,
-  X,
   Download,
+  Trash2,
   FolderOpen,
+  Plus,
+  Check,
+  CheckSquare,
+  Square as SquareOutline,
+  ClipboardList,
+  ExternalLink,
+  X,
+  ChevronDown,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
-// Color Palette
-const COLORS = [
-  '#ffffff', // White
-  '#94a3b8', // Slate Gray
-  '#3b82f6', // Royal Blue
-  '#10b981', // Emerald Green
-  '#f59e0b', // Amber
-  '#ef4444', // Red
-  '#a855f7', // Purple
-  '#ec4899', // Pink
-  '#06b6d4', // Cyan
-  '#000000', // Black
+const STROKE_COLORS = [
+  { label: 'Black', value: '#1e1e1e' },
+  { label: 'White', value: '#f8fafc' },
+  { label: 'Red', value: '#e03131' },
+  { label: 'Green', value: '#2f9e44' },
+  { label: 'Blue', value: '#1971c2' },
+  { label: 'Orange', value: '#f08c00' },
+  { label: 'Purple', value: '#9c36b5' },
 ];
 
-// Stroke Widths
-const STROKE_WIDTHS = [
-  { label: 'Fine', value: 2 },
-  { label: 'Medium', value: 4 },
-  { label: 'Bold', value: 8 },
-  { label: 'Thick', value: 16 },
+const FILL_COLORS = [
+  { label: 'Transparent', value: 'transparent' },
+  { label: 'Soft Red', value: 'rgba(255, 199, 199, 0.45)' },
+  { label: 'Soft Green', value: 'rgba(195, 240, 203, 0.45)' },
+  { label: 'Soft Blue', value: 'rgba(208, 235, 255, 0.45)' },
+  { label: 'Soft Orange', value: 'rgba(255, 236, 179, 0.45)' },
+  { label: 'Soft Purple', value: 'rgba(238, 210, 255, 0.45)' },
 ];
 
 export default function WhiteboardPage() {
@@ -56,893 +57,493 @@ export default function WhiteboardPage() {
 
   // Canvas Refs
   const canvasRef = useRef(null);
-  const fileInputRef = useRef(null);
   const containerRef = useRef(null);
 
-  // Whiteboards management state
+  // Whiteboards management
   const [boards, setBoards] = useState([]);
   const [activeBoardId, setActiveBoardId] = useState(null);
-  const [activeBoardTitle, setActiveBoardTitle] = useState('Weekly Study Notes');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [editingTitleId, setEditingTitleId] = useState(null);
-  const [newTitleInput, setNewTitleInput] = useState('');
+  const [activeBoardTitle, setActiveBoardTitle] = useState('My Excali Canvas');
+  const [isBoardsMenuOpen, setIsBoardsMenuOpen] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'unsaved'
 
-  // Active Tool state
-  const [activeTool, setActiveTool] = useState('pen'); // 'pen' | 'eraser' | 'select' | 'text' | 'rectangle' | 'circle' | 'line' | 'arrow' | 'pan'
-  const [currentColor, setCurrentColor] = useState('#3b82f6');
-  const [currentWidth, setCurrentWidth] = useState(4);
-  const [fontSize, setFontSize] = useState(20);
-
-  // Infinite Canvas Viewport: pan & zoom
+  // Canvas Viewport (Infinite pan & zoom)
   const [viewport, setViewport] = useState({ panX: 0, panY: 0, zoom: 1.0 });
 
-  // Canvas Elements
+  // Tools & Properties
+  // 'selection' | 'rectangle' | 'diamond' | 'ellipse' | 'arrow' | 'line' | 'pencil' | 'text' | 'eraser' | 'hand'
+  const [activeTool, setActiveTool] = useState('pencil');
+  const [strokeColor, setStrokeColor] = useState('#1e1e1e');
+  const [fillColor, setFillColor] = useState('transparent');
+  const [strokeWidth, setStrokeWidth] = useState(3.5);
+  const [roughness, setRoughness] = useState(1.5);
+  const [fontSize, setFontSize] = useState(32);
+  const [canvasTheme, setCanvasTheme] = useState('light'); // 'light' | 'dark'
+
+  // Elements & Selection
   const [elements, setElements] = useState([]);
   const elementsRef = useRef([]);
   elementsRef.current = elements;
+  const [selectedId, setSelectedId] = useState(null);
 
-  const [selectedElementId, setSelectedElementId] = useState(null);
-
-  // Undo / Redo stacks
+  // History for Undo / Redo
   const [history, setHistory] = useState([[]]);
-  const [historyIndex, setHistoryIndex] = useState(0);
+  const [historyIdx, setHistoryIdx] = useState(0);
 
-  // Save state
-  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'unsaved'
+  // Text Prompt Modal / Inline Editor
+  const [textModal, setTextModal] = useState(null); // { x, y, screenX, screenY, text, id, isEdit }
+  const textInputRef = useRef(null);
 
-  // Text Tool Inline input
-  const [textInput, setTextInput] = useState(null); // { x, y, screenX, screenY, text }
+  // Daily Tasks Drawer
+  const [isNotepadOpen, setIsNotepadOpen] = useState(false);
+  const [notepadTab, setNotepadTab] = useState('tasks');
+  const [todos, setTodos] = useState([]);
+  const [newTodoTitle, setNewTodoTitle] = useState('');
+  const [newTodoPriority, setNewTodoPriority] = useState('medium');
+  const [todoFilter, setTodoFilter] = useState('all');
+  const [quickNotes, setQuickNotes] = useState(() => localStorage.getItem('whiteboard_quick_notes') || '');
 
-  // Interaction tracking refs
+  // Pointer tracking
   const isInteracting = useRef(false);
-  const currentAction = useRef(null); // 'drawing' | 'panning' | 'moving' | 'resizing' | 'creating_shape'
-  const startPointer = useRef({ x: 0, y: 0, worldX: 0, worldY: 0 });
-  const activeStroke = useRef(null);
-  const currentShape = useRef(null);
-  const dragOffset = useRef({ x: 0, y: 0 });
-  const resizeHandle = useRef(null); // 'tl', 'tr', 'bl', 'br'
-  const isSpacePressed = useRef(false);
+  const actionType = useRef(null); // 'drawing' | 'shape_create' | 'moving' | 'panning'
+  const pointerStart = useRef({ clientX: 0, clientY: 0, worldX: 0, worldY: 0 });
+  const activeDraftElement = useRef(null);
+  const dragStartPositions = useRef({}); // Stores initial pos of element when dragging starts
 
-  // Convert Screen (client pixels) to Infinite World coordinates
-  const screenToWorld = useCallback(
-    (screenX, screenY) => {
-      const rect = canvasRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
-      const x = screenX - rect.left;
-      const y = screenY - rect.top;
-      const z = viewport.zoom || 1.0;
-      return {
-        x: x / z - (viewport.panX || 0),
-        y: y / z - (viewport.panY || 0),
-      };
-    },
-    [viewport]
-  );
+  // Coordinate transforms
+  const screenToWorld = useCallback((clientX, clientY) => {
+    if (!canvasRef.current) return { x: 0, y: 0 };
+    const rect = canvasRef.current.getBoundingClientRect();
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    return {
+      x: (sx - viewport.panX) / viewport.zoom,
+      y: (sy - viewport.panY) / viewport.zoom,
+    };
+  }, [viewport]);
 
-  // Commit and push elements to history cleanly
-  const commitElements = useCallback(
-    (newElements) => {
-      const validElements = (newElements || []).filter(Boolean);
-      setElements(validElements);
-      setHistory((prev) => {
-        const sliced = prev.slice(0, historyIndex + 1);
-        return [...sliced, validElements];
-      });
-      setHistoryIndex((prev) => prev + 1);
-      setSaveStatus('unsaved');
-    },
-    [historyIndex]
-  );
+  const worldToScreen = useCallback((wx, wy) => {
+    return {
+      x: wx * viewport.zoom + viewport.panX,
+      y: wy * viewport.zoom + viewport.panY,
+    };
+  }, [viewport]);
 
-  // 1. Initial Load of Whiteboards
-  const loadBoardsList = async () => {
-    if (!isAuthenticated) return;
-    try {
-      const list = await api.getWhiteboards();
-      setBoards(list || []);
-      if (list && list.length > 0 && !activeBoardId) {
-        loadBoardDetails(list[0].id);
-      }
-    } catch (err) {
-      console.error('Failed to load whiteboards list:', err);
-    }
-  };
+  const pushHistory = useCallback((newElements) => {
+    setHistory((prev) => {
+      const upToCurrent = prev.slice(0, historyIdx + 1);
+      return [...upToCurrent, newElements];
+    });
+    setHistoryIdx((prev) => prev + 1);
+    setSaveStatus('unsaved');
+  }, [historyIdx]);
 
-  const loadBoardDetails = async (boardId) => {
-    try {
-      const board = await api.getWhiteboard(boardId);
-      setActiveBoardId(board.id);
-      setActiveBoardTitle(board.title || 'Untitled Whiteboard');
-      const valid = (board.elements || []).filter(Boolean);
-      setElements(valid);
-      if (board.viewport) {
-        setViewport({
-          panX: board.viewport.panX || 0,
-          panY: board.viewport.panY || 0,
-          zoom: board.viewport.zoom || 1.0,
-        });
-      }
-      setHistory([valid]);
-      setHistoryIndex(0);
-      setSaveStatus('saved');
-    } catch (err) {
-      console.error('Failed to load whiteboard details:', err);
-    }
-  };
-
-  useEffect(() => {
-    loadBoardsList();
-  }, [isAuthenticated]);
-
-  // 2. Debounced Auto-Save
-  useEffect(() => {
-    if (!activeBoardId || saveStatus !== 'unsaved') return;
-
-    const timer = setTimeout(async () => {
-      setSaveStatus('saving');
-      try {
-        await api.updateWhiteboard(activeBoardId, {
-          title: activeBoardTitle,
-          elements: elementsRef.current,
-          viewport,
-        });
-        setSaveStatus('saved');
-      } catch (err) {
-        console.error('Failed auto-saving whiteboard:', err);
-        setSaveStatus('unsaved');
-      }
-    }, 1500);
-
-    return () => clearTimeout(timer);
-  }, [elements, viewport, activeBoardId, activeBoardTitle, saveStatus]);
-
-  // Explicit Save
-  const handleManualSave = async () => {
-    if (!activeBoardId) return;
-    setSaveStatus('saving');
-    try {
-      await api.updateWhiteboard(activeBoardId, {
-        title: activeBoardTitle,
-        elements: elementsRef.current,
-        viewport,
-      });
-      setSaveStatus('saved');
-    } catch (err) {
-      alert(`Failed saving: ${err.message}`);
-      setSaveStatus('unsaved');
-    }
-  };
-
-  // Create New Board
-  const handleCreateBoard = async () => {
-    try {
-      const newBoard = await api.createWhiteboard({ title: 'New Study Canvas' });
-      setBoards((prev) => [newBoard, ...prev]);
-      await loadBoardDetails(newBoard.id);
-      setIsSidebarOpen(false);
-    } catch (err) {
-      alert(`Error creating board: ${err.message}`);
-    }
-  };
-
-  // Delete Board
-  const handleDeleteBoard = async (id, e) => {
-    e.stopPropagation();
-    if (boards.length <= 1) {
-      alert('You must keep at least one whiteboard.');
-      return;
-    }
-    if (!window.confirm('Are you sure you want to delete this whiteboard?')) return;
-    try {
-      await api.deleteWhiteboard(id);
-      const remaining = boards.filter((b) => b.id !== id);
-      setBoards(remaining);
-      if (activeBoardId === id && remaining.length > 0) {
-        loadBoardDetails(remaining[0].id);
-      }
-    } catch (err) {
-      alert(`Error deleting board: ${err.message}`);
-    }
-  };
-
-  // Rename Board
-  const handleSaveRename = async (id, e) => {
-    e.stopPropagation();
-    if (!newTitleInput.trim()) return;
-    try {
-      await api.updateWhiteboard(id, { title: newTitleInput.trim() });
-      setBoards((prev) =>
-        prev.map((b) => (b.id === id ? { ...b, title: newTitleInput.trim() } : b))
-      );
-      if (activeBoardId === id) {
-        setActiveBoardTitle(newTitleInput.trim());
-      }
-      setEditingTitleId(null);
-    } catch (err) {
-      alert(`Error updating title: ${err.message}`);
-    }
-  };
-
-  // 3. Redraw Canvas
-  const redraw = useCallback(() => {
+  // ----------------------------------------------------
+  // Canvas Rendering with RoughJS
+  // ----------------------------------------------------
+  const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    try {
-      const dpr = window.devicePixelRatio || 1;
-      const width = canvas.width / dpr;
-      const height = canvas.height / dpr;
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+    }
 
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    // Background
+    ctx.fillStyle = canvasTheme === 'dark' ? '#121212' : '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    // Subtle grid dots
+    ctx.save();
+    ctx.fillStyle = canvasTheme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.10)';
+    const gridSize = 24 * viewport.zoom;
+    const startX = ((viewport.panX % gridSize) + gridSize) % gridSize;
+    const startY = ((viewport.panY % gridSize) + gridSize) % gridSize;
+    for (let x = startX; x < width; x += gridSize) {
+      for (let y = startY; y < height; y += gridSize) {
+        ctx.beginPath();
+        ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    // Viewport transform
+    ctx.translate(viewport.panX, viewport.panY);
+    ctx.scale(viewport.zoom, viewport.zoom);
+
+    const rc = rough.canvas(canvas);
+    const allToDraw = [...elementsRef.current];
+    if (activeDraftElement.current) {
+      allToDraw.push(activeDraftElement.current);
+    }
+
+    allToDraw.forEach((el) => {
       ctx.save();
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
+      ctx.globalAlpha = (el.opacity ?? 100) / 100;
 
-      // Deep dark background
-      ctx.fillStyle = '#0a0b0e';
-      ctx.fillRect(0, 0, width, height);
+      const opts = {
+        stroke: el.strokeColor || '#1e1e1e',
+        strokeWidth: el.strokeWidth || 3.5,
+        roughness: el.roughness ?? 1.5,
+        bowing: 1.5,
+        seed: el.seed || 1,
+        fill: el.fillColor && el.fillColor !== 'transparent' ? el.fillColor : undefined,
+        fillStyle: 'hachure',
+        hachureAngle: 60,
+        hachureGap: 6,
+      };
 
-      // Draw Infinite Dot Grid
-      const zoom = viewport.zoom || 1.0;
-      const panX = viewport.panX || 0;
-      const panY = viewport.panY || 0;
-
-      const gridSize = 40 * zoom;
-      const offsetX = ((panX * zoom) % gridSize + gridSize) % gridSize;
-      const offsetY = ((panY * zoom) % gridSize + gridSize) % gridSize;
-
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-      const dotRadius = Math.max(1, 1.2 * Math.min(1.5, zoom));
-      for (let x = offsetX; x < width; x += gridSize) {
-        for (let y = offsetY; y < height; y += gridSize) {
-          ctx.beginPath();
-          ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
-          ctx.fill();
+      if (el.type === 'rectangle') {
+        rc.rectangle(el.x, el.y, el.width, el.height, opts);
+      } else if (el.type === 'diamond') {
+        const cx = el.x + el.width / 2;
+        const cy = el.y + el.height / 2;
+        rc.polygon(
+          [
+            [cx, el.y],
+            [el.x + el.width, cy],
+            [cx, el.y + el.height],
+            [el.x, cy],
+          ],
+          opts
+        );
+      } else if (el.type === 'ellipse') {
+        const cx = el.x + el.width / 2;
+        const cy = el.y + el.height / 2;
+        rc.ellipse(cx, cy, Math.abs(el.width), Math.abs(el.height), opts);
+      } else if (el.type === 'line') {
+        rc.line(el.x1, el.y1, el.x2, el.y2, opts);
+      } else if (el.type === 'arrow') {
+        rc.line(el.x1, el.y1, el.x2, el.y2, opts);
+        const angle = Math.atan2(el.y2 - el.y1, el.x2 - el.x1);
+        const headLen = Math.max(14, (el.strokeWidth || 3) * 4);
+        const h1x = el.x2 - headLen * Math.cos(angle - Math.PI / 6);
+        const h1y = el.y2 - headLen * Math.sin(angle - Math.PI / 6);
+        const h2x = el.x2 - headLen * Math.cos(angle + Math.PI / 6);
+        const h2y = el.y2 - headLen * Math.sin(angle + Math.PI / 6);
+        rc.line(el.x2, el.y2, h1x, h1y, opts);
+        rc.line(el.x2, el.y2, h2x, h2y, opts);
+      } else if (el.type === 'pencil' && el.points && el.points.length > 1) {
+        ctx.strokeStyle = el.strokeColor || '#1e1e1e';
+        ctx.lineWidth = el.strokeWidth || 3;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(el.points[0][0], el.points[0][1]);
+        for (let i = 1; i < el.points.length; i++) {
+          const xc = (el.points[i][0] + el.points[i - 1][0]) / 2;
+          const yc = (el.points[i][1] + el.points[i - 1][1]) / 2;
+          ctx.quadraticCurveTo(el.points[i - 1][0], el.points[i - 1][1], xc, yc);
         }
+        ctx.stroke();
+      } else if (el.type === 'text') {
+        const textDrawColor =
+          canvasTheme === 'dark' && (el.strokeColor === '#1e1e1e' || !el.strokeColor)
+            ? '#f8fafc'
+            : canvasTheme === 'light' && (el.strokeColor === '#ffffff' || el.strokeColor === '#f8fafc')
+            ? '#1e1e1e'
+            : el.strokeColor || '#1e1e1e';
+
+        ctx.font = `600 ${el.fontSize || 32}px 'Caveat', cursive`;
+        ctx.fillStyle = textDrawColor;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        const lines = (el.text || '').split('\n');
+        const lHeight = (el.fontSize || 32) * 1.25;
+        lines.forEach((line, idx) => {
+          ctx.fillText(line, el.x, el.y + idx * lHeight);
+        });
       }
 
-      // Apply Viewport Transformation (Pan & Zoom)
-      ctx.translate(panX * zoom, panY * zoom);
-      ctx.scale(zoom, zoom);
+      // Selection bounding box with handles
+      if (el.id === selectedId) {
+        ctx.save();
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 1.5 / viewport.zoom;
+        ctx.setLineDash([4 / viewport.zoom, 4 / viewport.zoom]);
+        const box = getElementBounds(el);
+        const pad = 6 / viewport.zoom;
+        const bw = box.maxX - box.minX + pad * 2;
+        const bh = box.maxY - box.minY + pad * 2;
+        const bx = box.minX - pad;
+        const by = box.minY - pad;
+        ctx.strokeRect(bx, by, bw, bh);
 
-      // Render all saved elements
-      (elementsRef.current || []).forEach((elem) => {
-        if (elem) drawElement(ctx, elem);
-      });
+        // Corner handles
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 1.5 / viewport.zoom;
+        ctx.setLineDash([]);
+        const hSize = 8 / viewport.zoom;
+        const corners = [
+          [bx - hSize / 2, by - hSize / 2],
+          [bx + bw - hSize / 2, by - hSize / 2],
+          [bx - hSize / 2, by + bh - hSize / 2],
+          [bx + bw - hSize / 2, by + bh - hSize / 2],
+        ];
+        corners.forEach(([cx, cy]) => {
+          ctx.fillRect(cx, cy, hSize, hSize);
+          ctx.strokeRect(cx, cy, hSize, hSize);
+        });
 
-      // Render active stroke currently being drawn
-      if (activeStroke.current) {
-        drawElement(ctx, activeStroke.current);
-      }
+        // Top rotation handle circle
+        const rotY = by - 16 / viewport.zoom;
+        const rotX = bx + bw / 2;
+        ctx.beginPath();
+        ctx.arc(rotX, rotY, 4 / viewport.zoom, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
 
-      // Render active shape being dragged
-      if (currentShape.current) {
-        drawElement(ctx, currentShape.current);
-      }
-
-      // Render Selection Bounding Box & Handles
-      if (selectedElementId) {
-        const selected = (elementsRef.current || []).find((e) => e && e.id === selectedElementId);
-        if (selected) {
-          drawSelectionBox(ctx, selected, zoom);
-        }
+        ctx.restore();
       }
 
       ctx.restore();
-    } catch (err) {
-      console.error('Error during canvas redraw:', err);
-    }
-  }, [viewport, selectedElementId]);
-
-  // Draw single element on canvas
-  const drawElement = (ctx, elem) => {
-    if (!elem || !elem.type) return;
-    ctx.save();
-    try {
-      switch (elem.type) {
-        case 'stroke': {
-          if (!elem.points || elem.points.length < 2) {
-            if (elem.points && elem.points.length === 1) {
-              ctx.fillStyle = elem.color || '#3b82f6';
-              ctx.beginPath();
-              ctx.arc(elem.points[0].x, elem.points[0].y, (elem.width || 4) / 2, 0, Math.PI * 2);
-              ctx.fill();
-            }
-            break;
-          }
-          ctx.strokeStyle = elem.color || '#3b82f6';
-          ctx.lineWidth = elem.width || 4;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.beginPath();
-          ctx.moveTo(elem.points[0].x, elem.points[0].y);
-          for (let i = 1; i < elem.points.length; i++) {
-            const xc = (elem.points[i - 1].x + elem.points[i].x) / 2;
-            const yc = (elem.points[i - 1].y + elem.points[i].y) / 2;
-            ctx.quadraticCurveTo(elem.points[i - 1].x, elem.points[i - 1].y, xc, yc);
-          }
-          ctx.stroke();
-          break;
-        }
-
-        case 'shape': {
-          ctx.strokeStyle = elem.color || '#3b82f6';
-          ctx.lineWidth = elem.strokeWidth || 3;
-          ctx.fillStyle = elem.fill || 'transparent';
-
-          const { shapeType, x, y, width, height } = elem;
-
-          if (shapeType === 'rectangle') {
-            ctx.beginPath();
-            ctx.rect(x, y, width, height);
-            if (elem.fill && elem.fill !== 'transparent') ctx.fill();
-            ctx.stroke();
-          } else if (shapeType === 'circle') {
-            ctx.beginPath();
-            const rx = Math.abs(width) / 2;
-            const ry = Math.abs(height) / 2;
-            const cx = x + width / 2;
-            const cy = y + height / 2;
-            ctx.ellipse(cx, cy, Math.max(1, rx), Math.max(1, ry), 0, 0, Math.PI * 2);
-            if (elem.fill && elem.fill !== 'transparent') ctx.fill();
-            ctx.stroke();
-          } else if (shapeType === 'line') {
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-            ctx.lineTo(x + width, y + height);
-            ctx.stroke();
-          } else if (shapeType === 'arrow') {
-            const startX = x;
-            const startY = y;
-            const endX = x + width;
-            const endY = y + height;
-            ctx.beginPath();
-            ctx.moveTo(startX, startY);
-            ctx.lineTo(endX, endY);
-            ctx.stroke();
-
-            const angle = Math.atan2(endY - startY, endX - startX);
-            const headLen = Math.max(12, (elem.strokeWidth || 3) * 3.5);
-            ctx.fillStyle = elem.color || '#3b82f6';
-            ctx.beginPath();
-            ctx.moveTo(endX, endY);
-            ctx.lineTo(
-              endX - headLen * Math.cos(angle - Math.PI / 6),
-              endY - headLen * Math.sin(angle - Math.PI / 6)
-            );
-            ctx.lineTo(
-              endX - headLen * Math.cos(angle + Math.PI / 6),
-              endY - headLen * Math.sin(angle + Math.PI / 6)
-            );
-            ctx.closePath();
-            ctx.fill();
-          }
-          break;
-        }
-
-        case 'text': {
-          ctx.fillStyle = elem.color || '#ffffff';
-          ctx.font = `${elem.fontSize || 20}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-          ctx.textBaseline = 'top';
-          const lines = (elem.text || '').split('\n');
-          const lineHeight = (elem.fontSize || 20) * 1.35;
-          lines.forEach((line, i) => {
-            ctx.fillText(line, elem.x, elem.y + i * lineHeight);
-          });
-          break;
-        }
-
-        case 'image': {
-          if (!elem.imageObj) {
-            const img = new Image();
-            img.src = elem.src;
-            img.onload = () => {
-              elem.imageObj = img;
-              redraw();
-            };
-          } else {
-            ctx.drawImage(elem.imageObj, elem.x, elem.y, elem.width, elem.height);
-          }
-          break;
-        }
-
-        default:
-          break;
-      }
-    } catch (e) {
-      console.error('Error drawing element:', e);
-    } finally {
-      ctx.restore();
-    }
-  };
-
-  // Draw Selection Bounding Box & Handles
-  const drawSelectionBox = (ctx, elem, zoom) => {
-    if (!elem) return;
-    const box = getElementBounds(elem);
-    if (!box) return;
-
-    ctx.save();
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = 1.5 / zoom;
-    ctx.setLineDash([4 / zoom, 4 / zoom]);
-    ctx.strokeRect(box.x, box.y, box.width, box.height);
-
-    ctx.setLineDash([]);
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = 1.5 / zoom;
-    const handleSize = 8 / zoom;
-
-    const corners = [
-      { x: box.x, y: box.y },
-      { x: box.x + box.width, y: box.y },
-      { x: box.x, y: box.y + box.height },
-      { x: box.x + box.width, y: box.y + box.height },
-    ];
-
-    corners.forEach((c) => {
-      ctx.fillRect(c.x - handleSize / 2, c.y - handleSize / 2, handleSize, handleSize);
-      ctx.strokeRect(c.x - handleSize / 2, c.y - handleSize / 2, handleSize, handleSize);
     });
 
     ctx.restore();
-  };
+  }, [viewport, canvasTheme, selectedId]);
 
-  // Get Bounding Box of any element
-  const getElementBounds = (elem) => {
-    if (!elem) return null;
-    switch (elem.type) {
-      case 'stroke': {
-        if (!elem.points || elem.points.length === 0) return null;
-        let minX = Infinity;
-        let minY = Infinity;
-        let maxX = -Infinity;
-        let maxY = -Infinity;
-        elem.points.forEach((p) => {
-          if (p.x < minX) minX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y > maxY) maxY = p.y;
-        });
-        const pad = (elem.width || 4) / 2;
-        return {
-          x: minX - pad,
-          y: minY - pad,
-          width: Math.max(10, maxX - minX + pad * 2),
-          height: Math.max(10, maxY - minY + pad * 2),
-        };
-      }
-      case 'shape':
-      case 'image':
-        return {
-          x: Math.min(elem.x, elem.x + elem.width),
-          y: Math.min(elem.y, elem.y + elem.height),
-          width: Math.abs(elem.width),
-          height: Math.abs(elem.height),
-        };
-      case 'text': {
-        const lines = (elem.text || '').split('\n');
-        const maxLine = lines.reduce((max, l) => Math.max(max, l.length), 0);
-        const w = Math.max(40, maxLine * ((elem.fontSize || 20) * 0.6));
-        const h = Math.max(20, lines.length * ((elem.fontSize || 20) * 1.35));
-        return { x: elem.x, y: elem.y, width: w, height: h };
-      }
-      default:
-        return null;
-    }
-  };
-
-  // Hit test: Find element under world coordinate
-  const hitTestElement = (worldX, worldY) => {
-    const arr = elementsRef.current || [];
-    for (let i = arr.length - 1; i >= 0; i--) {
-      const elem = arr[i];
-      if (!elem) continue;
-      const box = getElementBounds(elem);
-      if (
-        box &&
-        worldX >= box.x &&
-        worldX <= box.x + box.width &&
-        worldY >= box.y &&
-        worldY <= box.y + box.height
-      ) {
-        return elem;
-      }
-    }
-    return null;
-  };
-
-  // Resize Canvas to Window
   useEffect(() => {
-    const handleResize = () => {
-      const canvas = canvasRef.current;
-      const container = containerRef.current;
-      if (!canvas || !container) return;
+    renderCanvas();
+  }, [renderCanvas, elements, selectedId]);
 
-      const dpr = window.devicePixelRatio || 1;
-      const rect = container.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${rect.height}px`;
-
-      redraw();
-    };
-
-    handleResize();
+  useEffect(() => {
+    const handleResize = () => renderCanvas();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [redraw]);
+  }, [renderCanvas]);
 
-  // Redraw whenever state changes
-  useEffect(() => {
-    redraw();
-  }, [elements, viewport, selectedElementId, redraw]);
-
-  // 4. Keyboard Shortcuts: Undo, Redo, Spacebar Pan, Delete
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
-
-      if (e.code === 'Space' && !isSpacePressed.current) {
-        isSpacePressed.current = true;
-        if (canvasRef.current) canvasRef.current.style.cursor = 'grab';
-      }
-
-      // Undo: Ctrl+Z
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        handleUndo();
-      }
-
-      // Redo: Ctrl+Y or Ctrl+Shift+Z
-      if (
-        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') ||
-        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')
-      ) {
-        e.preventDefault();
-        handleRedo();
-      }
-
-      // Delete selected object
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedElementId) {
-          e.preventDefault();
-          const next = elementsRef.current.filter((el) => el && el.id !== selectedElementId);
-          commitElements(next);
-          setSelectedElementId(null);
-        }
-      }
-    };
-
-    const handleKeyUp = (e) => {
-      if (e.code === 'Space') {
-        isSpacePressed.current = false;
-        if (canvasRef.current) {
-          canvasRef.current.style.cursor = activeTool === 'pan' ? 'grab' : 'crosshair';
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [selectedElementId, activeTool, commitElements]);
-
-  // 5. Global Paste Handler (Ctrl+V Screenshots / Images)
-  useEffect(() => {
-    const handlePaste = (e) => {
-      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-          const blob = items[i].getAsFile();
-          if (!blob) continue;
-
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            const src = event.target.result;
-            const img = new Image();
-            img.onload = () => {
-              const canvas = canvasRef.current;
-              const cx = canvas ? canvas.width / (2 * (window.devicePixelRatio || 1)) : 400;
-              const cy = canvas ? canvas.height / (2 * (window.devicePixelRatio || 1)) : 300;
-              const worldCenter = screenToWorld(cx, cy);
-
-              const maxW = 500;
-              const scale = img.width > maxW ? maxW / img.width : 1;
-              const w = img.width * scale;
-              const h = img.height * scale;
-
-              const newImgElem = {
-                id: `img_${Date.now()}`,
-                type: 'image',
-                x: worldCenter.x - w / 2,
-                y: worldCenter.y - h / 2,
-                width: w,
-                height: h,
-                src,
-                imageObj: img,
-              };
-
-              const next = [...elementsRef.current, newImgElem];
-              commitElements(next);
-              setSelectedElementId(newImgElem.id);
-              setActiveTool('select');
-            };
-            img.src = src;
-          };
-          reader.readAsDataURL(blob);
-          break;
-        }
-      }
-    };
-
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [screenToWorld, commitElements]);
-
-  // 6. Handle File Upload (Insert Image)
-  const handleImageUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const src = event.target?.result;
-      const img = new Image();
-      img.onload = () => {
-        const canvas = canvasRef.current;
-        const cx = canvas ? canvas.width / (2 * (window.devicePixelRatio || 1)) : 400;
-        const cy = canvas ? canvas.height / (2 * (window.devicePixelRatio || 1)) : 300;
-        const worldCenter = screenToWorld(cx, cy);
-
-        const maxW = 500;
-        const scale = img.width > maxW ? maxW / img.width : 1;
-        const w = img.width * scale;
-        const h = img.height * scale;
-
-        const newImgElem = {
-          id: `img_${Date.now()}`,
-          type: 'image',
-          x: worldCenter.x - w / 2,
-          y: worldCenter.y - h / 2,
-          width: w,
-          height: h,
-          src,
-          imageObj: img,
-        };
-
-        const next = [...elementsRef.current, newImgElem];
-        commitElements(next);
-        setSelectedElementId(newImgElem.id);
-        setActiveTool('select');
-      };
-      img.src = src;
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  };
-
-  // 7. Mouse / Stylus Handlers
-  const handlePointerDown = (e) => {
-    if (textInput) {
-      commitText();
+  // Bounds & Hit Detection
+  function getElementBounds(el) {
+    if (el.type === 'rectangle' || el.type === 'diamond' || el.type === 'ellipse') {
+      const minX = Math.min(el.x, el.x + el.width);
+      const maxX = Math.max(el.x, el.x + el.width);
+      const minY = Math.min(el.y, el.y + el.height);
+      const maxY = Math.max(el.y, el.y + el.height);
+      return { minX, minY, maxX, maxY };
     }
+    if (el.type === 'line' || el.type === 'arrow') {
+      return {
+        minX: Math.min(el.x1, el.x2),
+        minY: Math.min(el.y1, el.y2),
+        maxX: Math.max(el.x1, el.x2),
+        maxY: Math.max(el.y1, el.y2),
+      };
+    }
+    if (el.type === 'pencil' && el.points && el.points.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      el.points.forEach(([px, py]) => {
+        if (px < minX) minX = px;
+        if (py < minY) minY = py;
+        if (px > maxX) maxX = px;
+        if (py > maxY) maxY = py;
+      });
+      return { minX, minY, maxX, maxY };
+    }
+    if (el.type === 'text') {
+      const lines = (el.text || '').split('\n');
+      const maxLen = lines.reduce((acc, l) => Math.max(acc, l.length), 0);
+      const width = Math.max(40, maxLen * (el.fontSize || 32) * 0.55);
+      const height = lines.length * (el.fontSize || 32) * 1.25;
+      return { minX: el.x, minY: el.y, maxX: el.x + width, maxY: el.y + height };
+    }
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  }
+
+  function hitTest(el, wx, wy) {
+    const box = getElementBounds(el);
+    const pad = 10;
+    return (
+      wx >= box.minX - pad &&
+      wx <= box.maxX + pad &&
+      wy >= box.minY - pad &&
+      wy <= box.maxY + pad
+    );
+  }
+
+  // ----------------------------------------------------
+  // Pointer Event Handlers
+  // ----------------------------------------------------
+  const handlePointerDown = (e) => {
+    if (e.button === 1 || activeTool === 'hand' || e.spaceKey) {
+      isInteracting.current = true;
+      actionType.current = 'panning';
+      pointerStart.current = { clientX: e.clientX, clientY: e.clientY };
+      return;
+    }
+
+    if (e.button !== 0) return;
 
     const world = screenToWorld(e.clientX, e.clientY);
-    startPointer.current = { x: e.clientX, y: e.clientY, worldX: world.x, worldY: world.y };
+    const clicked = [...elements].reverse().find((el) => hitTest(el, world.x, world.y));
+
+    // Deselect if clicking on empty space
+    if (!clicked) {
+      setSelectedId(null);
+    }
+
     isInteracting.current = true;
+    pointerStart.current = { clientX: e.clientX, clientY: e.clientY, worldX: world.x, worldY: world.y };
 
-    // Pan with spacebar or middle click or Pan tool
-    if (isSpacePressed.current || e.button === 1 || activeTool === 'pan') {
-      currentAction.current = 'panning';
-      if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
-      return;
-    }
-
-    // Eraser Tool
-    if (activeTool === 'eraser') {
-      currentAction.current = 'erasing';
-      eraseAt(world.x, world.y);
-      return;
-    }
-
-    // Text Tool: Click to place text box
-    if (activeTool === 'text') {
-      setTextInput({
-        x: world.x,
-        y: world.y,
-        screenX: e.clientX,
-        screenY: e.clientY,
-        text: '',
-      });
-      return;
-    }
-
-    // Pen Tool: Begin freehand stroke
-    if (activeTool === 'pen') {
-      currentAction.current = 'drawing';
-      activeStroke.current = {
-        id: `stroke_${Date.now()}`,
-        type: 'stroke',
-        points: [{ x: world.x, y: world.y }],
-        color: currentColor,
-        width: currentWidth,
-      };
-      redraw();
-      return;
-    }
-
-    // Shape Tools
-    if (['rectangle', 'circle', 'line', 'arrow'].includes(activeTool)) {
-      currentAction.current = 'creating_shape';
-      currentShape.current = {
-        id: `shape_${Date.now()}`,
-        type: 'shape',
-        shapeType: activeTool,
-        x: world.x,
-        y: world.y,
-        width: 0,
-        height: 0,
-        color: currentColor,
-        strokeWidth: currentWidth,
-        fill: 'transparent',
-      };
-      redraw();
-      return;
-    }
-
-    // Select Tool: Check selection or dragging
-    if (activeTool === 'select') {
-      if (selectedElementId) {
-        const selected = elementsRef.current.find((el) => el && el.id === selectedElementId);
-        if (selected) {
-          const box = getElementBounds(selected);
-          if (box) {
-            const handleRadius = 10 / (viewport.zoom || 1);
-            const corners = {
-              tl: { x: box.x, y: box.y },
-              tr: { x: box.x + box.width, y: box.y },
-              bl: { x: box.x, y: box.y + box.height },
-              br: { x: box.x + box.width, y: box.y + box.height },
-            };
-            for (const [handleKey, pt] of Object.entries(corners)) {
-              if (
-                Math.abs(world.x - pt.x) <= handleRadius &&
-                Math.abs(world.y - pt.y) <= handleRadius
-              ) {
-                currentAction.current = 'resizing';
-                resizeHandle.current = handleKey;
-                return;
-              }
-            }
-          }
-        }
+    // Move element when clicked with selection tool OR when clicking an existing selected element
+    if (activeTool === 'selection' || clicked) {
+      if (clicked) {
+        setSelectedId(clicked.id);
+        actionType.current = 'moving';
+        // Store element state for dragging
+        dragStartPositions.current = {
+          element: clicked,
+          startX: world.x,
+          startY: world.y,
+        };
+        return;
       }
+      actionType.current = null;
+      return;
+    }
 
-      const hit = hitTestElement(world.x, world.y);
-      if (hit) {
-        setSelectedElementId(hit.id);
-        currentAction.current = 'moving';
-        dragOffset.current = {
-          x: world.x - hit.x,
-          y: world.y - hit.y,
+    if (activeTool === 'eraser') {
+      if (clicked) {
+        const next = elements.filter((el) => el.id !== clicked.id);
+        setElements(next);
+        pushHistory(next);
+      }
+      actionType.current = 'erasing';
+      return;
+    }
+
+    if (activeTool === 'text') {
+      // Open text creation modal
+      setTextModal({
+        x: world.x,
+        y: world.y,
+        text: '',
+        id: 'txt_' + Date.now(),
+        isEdit: false,
+      });
+      isInteracting.current = false;
+      return;
+    }
+
+    if (activeTool === 'pencil') {
+      actionType.current = 'drawing';
+      activeDraftElement.current = {
+        id: 'pen_' + Date.now(),
+        type: 'pencil',
+        points: [[world.x, world.y]],
+        strokeColor: canvasTheme === 'dark' && strokeColor === '#1e1e1e' ? '#f8fafc' : strokeColor,
+        strokeWidth,
+        seed: Math.floor(Math.random() * 2147483647),
+      };
+      renderCanvas();
+      return;
+    }
+
+    if (['rectangle', 'diamond', 'ellipse', 'line', 'arrow'].includes(activeTool)) {
+      actionType.current = 'shape_create';
+      const base = {
+        id: 'shape_' + Date.now(),
+        type: activeTool,
+        strokeColor: canvasTheme === 'dark' && strokeColor === '#1e1e1e' ? '#f8fafc' : strokeColor,
+        fillColor,
+        strokeWidth,
+        roughness,
+        seed: Math.floor(Math.random() * 2147483647),
+      };
+      if (activeTool === 'line' || activeTool === 'arrow') {
+        activeDraftElement.current = {
+          ...base,
+          x1: world.x,
+          y1: world.y,
+          x2: world.x,
+          y2: world.y,
         };
       } else {
-        setSelectedElementId(null);
+        activeDraftElement.current = {
+          ...base,
+          x: world.x,
+          y: world.y,
+          width: 0,
+          height: 0,
+        };
       }
-      redraw();
+      renderCanvas();
     }
   };
 
   const handlePointerMove = (e) => {
     if (!isInteracting.current) return;
-    const world = screenToWorld(e.clientX, e.clientY);
 
-    // Panning
-    if (currentAction.current === 'panning') {
-      const z = viewport.zoom || 1.0;
-      const dx = (e.clientX - startPointer.current.x) / z;
-      const dy = (e.clientY - startPointer.current.y) / z;
+    if (actionType.current === 'panning') {
+      const dx = e.clientX - pointerStart.current.clientX;
+      const dy = e.clientY - pointerStart.current.clientY;
+      pointerStart.current = { clientX: e.clientX, clientY: e.clientY };
       setViewport((prev) => ({
         ...prev,
-        panX: (prev.panX || 0) + dx,
-        panY: (prev.panY || 0) + dy,
+        panX: prev.panX + dx,
+        panY: prev.panY + dy,
       }));
-      startPointer.current = { x: e.clientX, y: e.clientY, worldX: world.x, worldY: world.y };
       return;
     }
 
-    // Erasing (while dragging)
-    if (currentAction.current === 'erasing') {
-      eraseAt(world.x, world.y);
+    const world = screenToWorld(e.clientX, e.clientY);
+
+    if (actionType.current === 'drawing' && activeDraftElement.current) {
+      activeDraftElement.current.points.push([world.x, world.y]);
+      renderCanvas();
       return;
     }
 
-    // Freehand Drawing
-    if (currentAction.current === 'drawing' && activeStroke.current) {
-      activeStroke.current.points.push({ x: world.x, y: world.y });
-      redraw();
+    if (actionType.current === 'shape_create' && activeDraftElement.current) {
+      const el = activeDraftElement.current;
+      if (el.type === 'line' || el.type === 'arrow') {
+        el.x2 = world.x;
+        el.y2 = world.y;
+      } else {
+        el.width = world.x - pointerStart.current.worldX;
+        el.height = world.y - pointerStart.current.worldY;
+      }
+      renderCanvas();
       return;
     }
 
-    // Creating Shape
-    if (currentAction.current === 'creating_shape' && currentShape.current) {
-      currentShape.current.width = world.x - currentShape.current.x;
-      currentShape.current.height = world.y - currentShape.current.y;
-      redraw();
-      return;
-    }
-
-    // Moving Selected Object
-    if (currentAction.current === 'moving' && selectedElementId) {
-      const dx = world.x - startPointer.current.worldX;
-      const dy = world.y - startPointer.current.worldY;
-      startPointer.current.worldX = world.x;
-      startPointer.current.worldY = world.y;
+    // Moving elements freely
+    if (actionType.current === 'moving' && selectedId) {
+      const dx = world.x - pointerStart.current.worldX;
+      const dy = world.y - pointerStart.current.worldY;
+      pointerStart.current.worldX = world.x;
+      pointerStart.current.worldY = world.y;
 
       setElements((prev) =>
         prev.map((el) => {
-          if (!el || el.id !== selectedElementId) return el;
-          if (el.type === 'stroke') {
+          if (el.id !== selectedId) return el;
+          if (el.type === 'line' || el.type === 'arrow') {
             return {
               ...el,
-              points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+              x1: el.x1 + dx,
+              y1: el.y1 + dy,
+              x2: el.x2 + dx,
+              y2: el.y2 + dy,
             };
           }
-          return {
-            ...el,
-            x: el.x + dx,
-            y: el.y + dy,
-          };
-        })
-      );
-      redraw();
-      return;
-    }
-
-    // Resizing Selected Object
-    if (currentAction.current === 'resizing' && selectedElementId && resizeHandle.current) {
-      const handle = resizeHandle.current;
-      setElements((prev) =>
-        prev.map((el) => {
-          if (!el || el.id !== selectedElementId) return el;
-          if (el.type === 'stroke') return el;
-
-          let newX = el.x;
-          let newY = el.y;
-          let newW = el.width;
-          let newH = el.height;
-
-          if (handle === 'br') {
-            newW = Math.max(15, world.x - el.x);
-            newH = Math.max(15, world.y - el.y);
-          } else if (handle === 'bl') {
-            newW = Math.max(15, el.x + el.width - world.x);
-            newX = world.x;
-            newH = Math.max(15, world.y - el.y);
-          } else if (handle === 'tr') {
-            newW = Math.max(15, world.x - el.x);
-            newH = Math.max(15, el.y + el.height - world.y);
-            newY = world.y;
-          } else if (handle === 'tl') {
-            newW = Math.max(15, el.x + el.width - world.x);
-            newH = Math.max(15, el.y + el.height - world.y);
-            newX = world.x;
-            newY = world.y;
+          if (el.type === 'pencil') {
+            return {
+              ...el,
+              points: el.points.map(([px, py]) => [px + dx, py + dy]),
+            };
           }
-
-          return { ...el, x: newX, y: newY, width: newW, height: newH };
+          return { ...el, x: el.x + dx, y: el.y + dy };
         })
       );
-      redraw();
     }
   };
 
@@ -950,202 +551,181 @@ export default function WhiteboardPage() {
     if (!isInteracting.current) return;
     isInteracting.current = false;
 
-    if (canvasRef.current) {
-      canvasRef.current.style.cursor =
-        isSpacePressed.current || activeTool === 'pan' ? 'grab' : 'crosshair';
-    }
+    if (activeDraftElement.current) {
+      const drafted = activeDraftElement.current;
+      activeDraftElement.current = null;
 
-    // Finished Freehand Stroke
-    if (currentAction.current === 'drawing' && activeStroke.current) {
-      const stroke = {
-        ...activeStroke.current,
-        points: [...activeStroke.current.points],
-      };
-      activeStroke.current = null;
+      let isValid = true;
+      if (drafted.type === 'pencil' && drafted.points.length < 2) isValid = false;
+      if (['rectangle', 'diamond', 'ellipse'].includes(drafted.type)) {
+        if (Math.abs(drafted.width) < 5 && Math.abs(drafted.height) < 5) isValid = false;
+      }
+      if (['line', 'arrow'].includes(drafted.type)) {
+        const dist = Math.hypot(drafted.x2 - drafted.x1, drafted.y2 - drafted.y1);
+        if (dist < 5) isValid = false;
+      }
 
-      if (stroke.points.length > 1) {
-        const next = [...elementsRef.current, stroke];
-        commitElements(next);
+      if (isValid) {
+        if (['rectangle', 'diamond', 'ellipse'].includes(drafted.type)) {
+          if (drafted.width < 0) {
+            drafted.x += drafted.width;
+            drafted.width = Math.abs(drafted.width);
+          }
+          if (drafted.height < 0) {
+            drafted.y += drafted.height;
+            drafted.height = Math.abs(drafted.height);
+          }
+        }
+        const updated = [...elements, drafted];
+        setElements(updated);
+        pushHistory(updated);
+        // Do not auto-select newly drawn shapes (avoids stuck purple box)
+        setSelectedId(null);
+      } else {
+        renderCanvas();
       }
     }
 
-    // Finished Shape
-    if (currentAction.current === 'creating_shape' && currentShape.current) {
-      const shape = { ...currentShape.current };
-      currentShape.current = null;
-
-      if (Math.abs(shape.width) > 3 || Math.abs(shape.height) > 3) {
-        const next = [...elementsRef.current, shape];
-        commitElements(next);
-        setSelectedElementId(shape.id);
-        setActiveTool('select');
-      }
+    if (actionType.current === 'moving') {
+      pushHistory(elementsRef.current);
     }
 
-    // Finished Moving or Resizing
-    if (currentAction.current === 'moving' || currentAction.current === 'resizing') {
-      commitElements(elementsRef.current);
-    }
-
-    currentAction.current = null;
-    resizeHandle.current = null;
-    redraw();
+    actionType.current = null;
   };
 
-  // Erase element at world coordinate
-  const eraseAt = (worldX, worldY) => {
-    const hit = hitTestElement(worldX, worldY);
-    if (hit) {
-      const next = elementsRef.current.filter((el) => el && el.id !== hit.id);
-      commitElements(next);
-      if (selectedElementId === hit.id) {
-        setSelectedElementId(null);
-      }
-      redraw();
-    }
-  };
-
-  // Commit text input
-  const commitText = () => {
-    if (!textInput || !textInput.text.trim()) {
-      setTextInput(null);
-      return;
-    }
-
-    const newTextElem = {
-      id: `text_${Date.now()}`,
-      type: 'text',
-      x: textInput.x,
-      y: textInput.y,
-      text: textInput.text,
-      color: currentColor,
-      fontSize,
-    };
-
-    const next = [...elementsRef.current, newTextElem];
-    commitElements(next);
-    setSelectedElementId(newTextElem.id);
-    setTextInput(null);
-    setActiveTool('select');
-  };
-
-  // 8. Mouse Wheel: Zoom in / Zoom out centered on cursor
+  // Wheel Infinite Scroll Pan (Scroll down moves down)
   const handleWheel = (e) => {
     e.preventDefault();
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (e.ctrlKey || e.metaKey) {
+      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+      const newZoom = Math.min(Math.max(viewport.zoom * zoomFactor, 0.15), 5.0);
+      const rect = canvasRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
 
-    const zoomFactor = Math.exp(-e.deltaY * 0.0015);
-    const currentZ = viewport.zoom || 1.0;
-    const newZoom = Math.min(5.0, Math.max(0.1, currentZ * zoomFactor));
-
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    const worldBefore = {
-      x: mouseX / currentZ - (viewport.panX || 0),
-      y: mouseY / currentZ - (viewport.panY || 0),
-    };
-
-    const newPanX = mouseX / newZoom - worldBefore.x;
-    const newPanY = mouseY / newZoom - worldBefore.y;
-
-    setViewport({
-      panX: newPanX,
-      panY: newPanY,
-      zoom: newZoom,
-    });
-  };
-
-  // Zoom Button Controls
-  const handleZoom = (delta) => {
-    const currentZ = viewport.zoom || 1.0;
-    const newZoom = Math.min(5.0, Math.max(0.1, currentZ + delta));
-    setViewport((prev) => ({ ...prev, zoom: newZoom }));
-  };
-
-  const handleResetZoom = () => {
-    setViewport({ panX: 0, panY: 0, zoom: 1.0 });
-  };
-
-  // Fit All / Overview
-  const handleFitAll = () => {
-    const arr = elementsRef.current || [];
-    if (arr.length === 0) {
-      handleResetZoom();
-      return;
+      setViewport((prev) => ({
+        zoom: newZoom,
+        panX: mouseX - (mouseX - prev.panX) * (newZoom / prev.zoom),
+        panY: mouseY - (mouseY - prev.panY) * (newZoom / prev.zoom),
+      }));
+    } else {
+      setViewport((prev) => ({
+        ...prev,
+        panX: prev.panX - (e.shiftKey ? e.deltaY : e.deltaX),
+        panY: prev.panY + (e.shiftKey ? 0 : e.deltaY), // Downward infinite scroll
+      }));
     }
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
+  };
 
-    arr.forEach((el) => {
-      const box = getElementBounds(el);
-      if (box) {
-        if (box.x < minX) minX = box.x;
-        if (box.y < minY) minY = box.y;
-        if (box.x + box.width > maxX) maxX = box.x + box.width;
-        if (box.y + box.height > maxY) maxY = box.y + box.height;
+  // Commit text
+  const handleSaveTextModal = () => {
+    if (!textModal) return;
+    const clean = textModal.text.trim();
+    if (clean) {
+      const resolvedColor =
+        canvasTheme === 'dark' && (strokeColor === '#1e1e1e' || strokeColor === '#000000')
+          ? '#f8fafc'
+          : canvasTheme === 'light' && strokeColor === '#ffffff'
+          ? '#1e1e1e'
+          : strokeColor;
+
+      const newEl = {
+        id: textModal.id,
+        type: 'text',
+        x: textModal.x,
+        y: textModal.y,
+        text: textModal.text,
+        fontSize,
+        strokeColor: resolvedColor,
+      };
+
+      const updated = textModal.isEdit
+        ? elements.map((el) => (el.id === textModal.id ? newEl : el))
+        : [...elements, newEl];
+
+      setElements(updated);
+      pushHistory(updated);
+      setSelectedId(newEl.id);
+    }
+    setTextModal(null);
+  };
+
+  // Undo / Redo / Delete
+  const handleUndo = useCallback(() => {
+    if (historyIdx > 0) {
+      const targetIdx = historyIdx - 1;
+      setHistoryIdx(targetIdx);
+      setElements(history[targetIdx]);
+      setSelectedId(null);
+      setSaveStatus('unsaved');
+    }
+  }, [historyIdx, history]);
+
+  const handleRedo = useCallback(() => {
+    if (historyIdx < history.length - 1) {
+      const targetIdx = historyIdx + 1;
+      setHistoryIdx(targetIdx);
+      setElements(history[targetIdx]);
+      setSelectedId(null);
+      setSaveStatus('unsaved');
+    }
+  }, [historyIdx, history]);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (!selectedId) return;
+    const updated = elements.filter((el) => el.id !== selectedId);
+    setElements(updated);
+    pushHistory(updated);
+    setSelectedId(null);
+  }, [selectedId, elements, pushHistory]);
+
+  // Backend persistence
+  const loadBoards = async () => {
+    if (!isAuthenticated) return;
+    try {
+      const data = await api.getWhiteboards();
+      setBoards(data || []);
+      if (data && data.length > 0 && !activeBoardId) {
+        loadBoardDetail(data[0].id);
       }
-    });
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const w = canvas.width / (window.devicePixelRatio || 1);
-    const h = canvas.height / (window.devicePixelRatio || 1);
-
-    const contentW = maxX - minX;
-    const contentH = maxY - minY;
-    if (contentW <= 0 || contentH <= 0 || !isFinite(contentW) || !isFinite(contentH)) return;
-
-    const scaleX = (w * 0.8) / contentW;
-    const scaleY = (h * 0.8) / contentH;
-    const fitZoom = Math.min(2.0, Math.max(0.15, Math.min(scaleX, scaleY)));
-
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    setViewport({
-      panX: w / 2 / fitZoom - centerX,
-      panY: h / 2 / fitZoom - centerY,
-      zoom: fitZoom,
-    });
+    } catch (err) {
+      console.error('Failed to load boards:', err);
+    }
   };
 
-  // Undo / Redo
-  const handleUndo = () => {
-    if (historyIndex > 0) {
-      const nextIndex = historyIndex - 1;
-      const targetState = history[nextIndex] || [];
-      setElements(targetState);
-      setHistoryIndex(nextIndex);
-      setSelectedElementId(null);
+  const loadBoardDetail = async (id) => {
+    try {
+      const b = await api.getWhiteboard(id);
+      setActiveBoardId(b.id);
+      setActiveBoardTitle(b.title);
+      setElements(b.elements || []);
+      setHistory([b.elements || []]);
+      setHistoryIdx(0);
+      setSaveStatus('saved');
+    } catch (err) {
+      console.error('Failed to load board details:', err);
+    }
+  };
+
+  const handleSaveBoard = async () => {
+    if (!activeBoardId) return;
+    setSaveStatus('saving');
+    try {
+      await api.updateWhiteboard(activeBoardId, {
+        title: activeBoardTitle,
+        elements,
+        viewport,
+      });
+      setSaveStatus('saved');
+    } catch (err) {
+      console.error('Save failed:', err);
       setSaveStatus('unsaved');
     }
   };
 
-  const handleRedo = () => {
-    if (historyIndex < history.length - 1) {
-      const nextIndex = historyIndex + 1;
-      const targetState = history[nextIndex] || [];
-      setElements(targetState);
-      setHistoryIndex(nextIndex);
-      setSelectedElementId(null);
-      setSaveStatus('unsaved');
-    }
-  };
-
-  // Export Canvas Image (PNG)
-  const handleExportPNG = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const link = document.createElement('a');
-    link.download = `${(activeBoardTitle || 'Whiteboard').replace(/\s+/g, '_')}.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-  };
+  useEffect(() => {
+    loadBoards();
+  }, [isAuthenticated]);
 
   return (
     <div
@@ -1156,654 +736,199 @@ export default function WhiteboardPage() {
         left: 0,
         width: '100vw',
         height: '100vh',
-        backgroundColor: '#0a0b0e',
-        color: '#ffffff',
         overflow: 'hidden',
+        backgroundColor: canvasTheme === 'dark' ? '#121212' : '#ffffff',
+        color: canvasTheme === 'dark' ? '#f1f5f9' : '#1e1e1e',
         userSelect: 'none',
-        display: 'flex',
-        flexDirection: 'column',
+        fontFamily: "'Inter', sans-serif",
       }}
     >
-      {/* Hidden File Input for Image Upload */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleImageUpload}
-        accept="image/*"
-        style={{ display: 'none' }}
-      />
-
-      {/* Top Floating Control Bar */}
+      {/* ---------------------------------------------------- */}
+      {/* TOP NOTIFICATION: OPEN NATIVE EXCALIDRAW IN NEW TAB  */}
+      {/* ---------------------------------------------------- */}
       <div
         style={{
           position: 'absolute',
-          top: '12px',
-          left: '12px',
-          right: '12px',
-          zIndex: 40,
+          top: 10,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 45,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.6rem',
+          backgroundColor: canvasTheme === 'dark' ? '#1e293b' : '#f8fafc',
+          border: `1px solid ${canvasTheme === 'dark' ? '#334155' : '#cbd5e1'}`,
+          borderRadius: '999px',
+          padding: '0.35rem 0.95rem',
+          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
+          fontSize: '0.78rem',
+        }}
+      >
+        <span style={{ color: canvasTheme === 'dark' ? '#94a3b8' : '#64748b' }}>
+          Need 100% full Excalidraw tools?
+        </span>
+        <a
+          href="https://excalidraw.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.3rem',
+            color: '#6366f1',
+            fontWeight: 700,
+            textDecoration: 'none',
+          }}
+        >
+          <span>Open Excalidraw in New Tab</span>
+          <ExternalLink size={13} />
+        </a>
+      </div>
+
+      {/* ---------------------------------------------------- */}
+      {/* TOP BAR: Navigation, Title & Centered Toolbar        */}
+      {/* ---------------------------------------------------- */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 12,
+          left: 16,
+          right: 16,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: '0.75rem',
           pointerEvents: 'none',
+          zIndex: 40,
         }}
       >
-        {/* Left: Back & Board Drawer Toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', pointerEvents: 'auto' }}>
+        {/* Left: Back Arrow */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', pointerEvents: 'auto' }}>
           <Link
             to="/"
-            className="btn btn-outline btn-sm"
+            title="Back to Curriculum"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '38px',
+              height: '38px',
+              borderRadius: '8px',
+              backgroundColor: canvasTheme === 'dark' ? '#1e1e1e' : '#ffffff',
+              border: `1px solid ${canvasTheme === 'dark' ? '#333' : '#e2e8f0'}`,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+              color: canvasTheme === 'dark' ? '#fff' : '#1e1e1e',
+              textDecoration: 'none',
+            }}
+          >
+            <ArrowLeft size={18} />
+          </Link>
+          <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{activeBoardTitle}</span>
+        </div>
+
+        {/* Center: Iconic Excalidraw Floating Toolbar */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.2rem',
+            padding: '0.25rem 0.4rem',
+            borderRadius: '10px',
+            backgroundColor: canvasTheme === 'dark' ? '#1e1e1e' : '#ffffff',
+            border: `1px solid ${canvasTheme === 'dark' ? '#333' : '#e2e8f0'}`,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+            pointerEvents: 'auto',
+            marginTop: '34px',
+          }}
+        >
+          {[
+            { id: 'selection', icon: MousePointer, label: 'Selection / Move (V)' },
+            { id: 'rectangle', icon: Square, label: 'Rectangle (R)' },
+            { id: 'diamond', icon: Diamond, label: 'Diamond (D)' },
+            { id: 'ellipse', icon: Circle, label: 'Ellipse (O)' },
+            { id: 'arrow', icon: MoveRight, label: 'Arrow (A)' },
+            { id: 'line', icon: Minus, label: 'Line (L)' },
+            { id: 'pencil', icon: Pen, label: 'Draw / Pen (P)' },
+            { id: 'text', icon: Type, label: 'Handwritten Text (T)' },
+            { id: 'eraser', icon: Eraser, label: 'Eraser (E)' },
+            { id: 'hand', icon: Hand, label: 'Pan / Hand (H)' },
+          ].map((tool) => {
+            const Icon = tool.icon;
+            const isActive = activeTool === tool.id;
+            return (
+              <button
+                key={tool.id}
+                onClick={() => {
+                  setActiveTool(tool.id);
+                  if (tool.id !== 'selection') setSelectedId(null);
+                }}
+                title={tool.label}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: isActive ? '#6366f1' : 'transparent',
+                  color: isActive ? '#ffffff' : canvasTheme === 'dark' ? '#cbd5e1' : '#475569',
+                  cursor: 'pointer',
+                }}
+              >
+                <Icon size={18} />
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Right: Save & Tasks */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', pointerEvents: 'auto' }}>
+          <button
+            onClick={() => setIsNotepadOpen(!isNotepadOpen)}
+            title="Open Daily Tasks Notepad"
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '0.35rem',
-              backgroundColor: 'rgba(19, 20, 28, 0.92)',
-              backdropFilter: 'blur(8px)',
-              borderColor: 'var(--border-color)',
+              padding: '0 0.65rem',
+              height: '36px',
+              borderRadius: '8px',
+              border: isNotepadOpen ? '1px solid #6366f1' : `1px solid ${canvasTheme === 'dark' ? '#333' : '#e2e8f0'}`,
+              backgroundColor: isNotepadOpen ? 'rgba(99, 102, 241, 0.15)' : canvasTheme === 'dark' ? '#1e1e1e' : '#fff',
+              color: isNotepadOpen ? '#6366f1' : 'inherit',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '0.8rem',
             }}
           >
-            <ArrowLeft size={14} />
-            <span>Dashboard</span>
-          </Link>
+            <ClipboardList size={16} />
+            <span>Tasks</span>
+          </button>
 
           <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="btn btn-outline btn-sm"
+            onClick={handleSaveBoard}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.4rem',
-              backgroundColor: 'rgba(19, 20, 28, 0.92)',
-              backdropFilter: 'blur(8px)',
-              borderColor: 'var(--border-color)',
-            }}
-          >
-            <FolderOpen size={14} />
-            <span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {activeBoardTitle}
-            </span>
-          </button>
-        </div>
-
-        {/* Center: Tools Dock */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.25rem',
-            backgroundColor: 'rgba(19, 20, 28, 0.94)',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid var(--border-color)',
-            borderRadius: '10px',
-            padding: '0.3rem 0.5rem',
-            pointerEvents: 'auto',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
-          }}
-        >
-          {/* Select Tool */}
-          <button
-            onClick={() => setActiveTool('select')}
-            title="Selection Tool (V)"
-            style={{
-              padding: '0.4rem',
-              borderRadius: '6px',
-              border: 'none',
+              gap: '0.35rem',
+              padding: '0.45rem 0.85rem',
+              borderRadius: '8px',
+              backgroundColor: canvasTheme === 'dark' ? '#1e1e1e' : '#ffffff',
+              border: `1px solid ${canvasTheme === 'dark' ? '#333' : '#e2e8f0'}`,
               cursor: 'pointer',
-              backgroundColor: activeTool === 'select' ? 'var(--accent-color)' : 'transparent',
-              color: '#ffffff',
+              fontSize: '0.8rem',
+              fontWeight: 600,
             }}
           >
-            <MousePointer size={16} />
-          </button>
-
-          {/* Pen Tool */}
-          <button
-            onClick={() => setActiveTool('pen')}
-            title="Pen (P)"
-            style={{
-              padding: '0.4rem',
-              borderRadius: '6px',
-              border: 'none',
-              cursor: 'pointer',
-              backgroundColor: activeTool === 'pen' ? 'var(--accent-color)' : 'transparent',
-              color: '#ffffff',
-            }}
-          >
-            <Pen size={16} />
-          </button>
-
-          {/* Eraser Tool */}
-          <button
-            onClick={() => setActiveTool('eraser')}
-            title="Eraser (E)"
-            style={{
-              padding: '0.4rem',
-              borderRadius: '6px',
-              border: 'none',
-              cursor: 'pointer',
-              backgroundColor: activeTool === 'eraser' ? 'var(--accent-color)' : 'transparent',
-              color: '#ffffff',
-            }}
-          >
-            <Eraser size={16} />
-          </button>
-
-          <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-subtle)', margin: '0 0.2rem' }} />
-
-          {/* Text Tool */}
-          <button
-            onClick={() => setActiveTool('text')}
-            title="Text Tool (T)"
-            style={{
-              padding: '0.4rem',
-              borderRadius: '6px',
-              border: 'none',
-              cursor: 'pointer',
-              backgroundColor: activeTool === 'text' ? 'var(--accent-color)' : 'transparent',
-              color: '#ffffff',
-            }}
-          >
-            <Type size={16} />
-          </button>
-
-          {/* Shapes */}
-          <button
-            onClick={() => setActiveTool('rectangle')}
-            title="Rectangle (R)"
-            style={{
-              padding: '0.4rem',
-              borderRadius: '6px',
-              border: 'none',
-              cursor: 'pointer',
-              backgroundColor: activeTool === 'rectangle' ? 'var(--accent-color)' : 'transparent',
-              color: '#ffffff',
-            }}
-          >
-            <Square size={16} />
-          </button>
-
-          <button
-            onClick={() => setActiveTool('circle')}
-            title="Circle / Ellipse (C)"
-            style={{
-              padding: '0.4rem',
-              borderRadius: '6px',
-              border: 'none',
-              cursor: 'pointer',
-              backgroundColor: activeTool === 'circle' ? 'var(--accent-color)' : 'transparent',
-              color: '#ffffff',
-            }}
-          >
-            <Circle size={16} />
-          </button>
-
-          <button
-            onClick={() => setActiveTool('line')}
-            title="Straight Line (L)"
-            style={{
-              padding: '0.4rem',
-              borderRadius: '6px',
-              border: 'none',
-              cursor: 'pointer',
-              backgroundColor: activeTool === 'line' ? 'var(--accent-color)' : 'transparent',
-              color: '#ffffff',
-            }}
-          >
-            <Minus size={16} />
-          </button>
-
-          <button
-            onClick={() => setActiveTool('arrow')}
-            title="Arrow (A)"
-            style={{
-              padding: '0.4rem',
-              borderRadius: '6px',
-              border: 'none',
-              cursor: 'pointer',
-              backgroundColor: activeTool === 'arrow' ? 'var(--accent-color)' : 'transparent',
-              color: '#ffffff',
-            }}
-          >
-            <MoveRight size={16} />
-          </button>
-
-          <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-subtle)', margin: '0 0.2rem' }} />
-
-          {/* Upload Image Button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            title="Insert Image (or paste Ctrl+V)"
-            style={{
-              padding: '0.4rem',
-              borderRadius: '6px',
-              border: 'none',
-              cursor: 'pointer',
-              backgroundColor: 'transparent',
-              color: '#ffffff',
-            }}
-          >
-            <ImageIcon size={16} />
-          </button>
-
-          {/* Pan Hand Tool */}
-          <button
-            onClick={() => setActiveTool('pan')}
-            title="Pan Tool (H or Spacebar+Drag)"
-            style={{
-              padding: '0.4rem',
-              borderRadius: '6px',
-              border: 'none',
-              cursor: 'pointer',
-              backgroundColor: activeTool === 'pan' ? 'var(--accent-color)' : 'transparent',
-              color: '#ffffff',
-            }}
-          >
-            <Hand size={16} />
-          </button>
-
-          <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-subtle)', margin: '0 0.2rem' }} />
-
-          {/* Color Palette Dropdown / Swatches */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0 0.2rem' }}>
-            {COLORS.slice(0, 5).map((c) => (
-              <button
-                key={c}
-                onClick={() => setCurrentColor(c)}
-                style={{
-                  width: '16px',
-                  height: '16px',
-                  borderRadius: '50%',
-                  backgroundColor: c,
-                  border: currentColor === c ? '2px solid #ffffff' : '1px solid rgba(255, 255, 255, 0.2)',
-                  cursor: 'pointer',
-                  padding: 0,
-                }}
-              />
-            ))}
-            <input
-              type="color"
-              value={currentColor}
-              onChange={(e) => setCurrentColor(e.target.value)}
-              title="Custom Color"
-              style={{
-                width: '18px',
-                height: '18px',
-                border: 'none',
-                borderRadius: '50%',
-                background: 'none',
-                cursor: 'pointer',
-                padding: 0,
-              }}
-            />
-          </div>
-
-          <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-subtle)', margin: '0 0.2rem' }} />
-
-          {/* Stroke Width Selector */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0 0.2rem' }}>
-            {STROKE_WIDTHS.map((sw) => (
-              <button
-                key={sw.value}
-                onClick={() => setCurrentWidth(sw.value)}
-                title={sw.label}
-                style={{
-                  width: '22px',
-                  height: '22px',
-                  borderRadius: '4px',
-                  border: 'none',
-                  backgroundColor: currentWidth === sw.value ? 'rgba(37, 99, 235, 0.4)' : 'transparent',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                }}
-              >
-                <div
-                  style={{
-                    width: `${Math.min(14, sw.value * 1.5)}px`,
-                    height: `${Math.min(14, sw.value * 1.5)}px`,
-                    borderRadius: '50%',
-                    backgroundColor: currentColor,
-                  }}
-                />
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Right: Undo/Redo & Save Status */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.4rem',
-            backgroundColor: 'rgba(19, 20, 28, 0.92)',
-            backdropFilter: 'blur(8px)',
-            border: '1px solid var(--border-color)',
-            borderRadius: '10px',
-            padding: '0.3rem 0.5rem',
-            pointerEvents: 'auto',
-          }}
-        >
-          <button
-            onClick={handleUndo}
-            disabled={historyIndex <= 0}
-            title="Undo (Ctrl+Z)"
-            style={{
-              padding: '0.35rem',
-              borderRadius: '4px',
-              border: 'none',
-              background: 'none',
-              color: historyIndex <= 0 ? 'var(--text-muted)' : '#ffffff',
-              cursor: historyIndex <= 0 ? 'not-allowed' : 'pointer',
-            }}
-          >
-            <RotateCcw size={15} />
-          </button>
-
-          <button
-            onClick={handleRedo}
-            disabled={historyIndex >= history.length - 1}
-            title="Redo (Ctrl+Y)"
-            style={{
-              padding: '0.35rem',
-              borderRadius: '4px',
-              border: 'none',
-              background: 'none',
-              color: historyIndex >= history.length - 1 ? 'var(--text-muted)' : '#ffffff',
-              cursor: historyIndex >= history.length - 1 ? 'not-allowed' : 'pointer',
-            }}
-          >
-            <RotateCw size={15} />
-          </button>
-
-          <span style={{ width: '1px', height: '16px', backgroundColor: 'var(--border-subtle)', margin: '0 0.15rem' }} />
-
-          <button
-            onClick={handleExportPNG}
-            title="Export PNG screenshot"
-            style={{
-              padding: '0.35rem',
-              borderRadius: '4px',
-              border: 'none',
-              background: 'none',
-              color: '#ffffff',
-              cursor: 'pointer',
-            }}
-          >
-            <Download size={15} />
-          </button>
-
-          <button
-            onClick={handleManualSave}
-            disabled={saveStatus === 'saving'}
-            className="btn btn-primary btn-sm"
-            style={{
-              fontSize: '0.75rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.3rem',
-              padding: '0.25rem 0.6rem',
-            }}
-          >
-            <Save size={13} />
-            <span>
-              {saveStatus === 'saving'
-                ? 'Saving...'
-                : saveStatus === 'unsaved'
-                ? 'Save'
-                : 'Saved ✓'}
-            </span>
+            <Save size={15} />
+            <span>{saveStatus === 'saving' ? 'Saving...' : saveStatus === 'unsaved' ? 'Save' : 'Saved'}</span>
           </button>
         </div>
       </div>
 
-      {/* Floating Bottom Viewport Navigation HUD */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: '16px',
-          left: '16px',
-          zIndex: 40,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.3rem',
-          backgroundColor: 'rgba(19, 20, 28, 0.94)',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid var(--border-color)',
-          borderRadius: '8px',
-          padding: '0.3rem 0.6rem',
-          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
-        }}
-      >
-        <button
-          onClick={() => handleZoom(-0.15)}
-          title="Zoom Out"
-          style={{
-            padding: '0.3rem',
-            background: 'none',
-            border: 'none',
-            color: '#ffffff',
-            cursor: 'pointer',
-          }}
-        >
-          <ZoomOut size={14} />
-        </button>
-
-        <span
-          onClick={handleResetZoom}
-          title="Click to reset to 100%"
-          style={{
-            fontSize: '0.75rem',
-            fontWeight: '600',
-            color: 'var(--text-secondary)',
-            minWidth: '45px',
-            textAlign: 'center',
-            cursor: 'pointer',
-          }}
-        >
-          {Math.round((viewport.zoom || 1) * 100)}%
-        </span>
-
-        <button
-          onClick={() => handleZoom(0.15)}
-          title="Zoom In"
-          style={{
-            padding: '0.3rem',
-            background: 'none',
-            border: 'none',
-            color: '#ffffff',
-            cursor: 'pointer',
-          }}
-        >
-          <ZoomIn size={14} />
-        </button>
-
-        <span style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-subtle)', margin: '0 0.2rem' }} />
-
-        <button
-          onClick={handleFitAll}
-          title="Fit All Content in View"
-          style={{
-            padding: '0.3rem',
-            background: 'none',
-            border: 'none',
-            color: '#ffffff',
-            cursor: 'pointer',
-          }}
-        >
-          <Maximize2 size={14} />
-        </button>
-      </div>
-
-      {/* Tip Notice floating bottom right */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: '16px',
-          right: '16px',
-          zIndex: 30,
-          fontSize: '0.725rem',
-          color: 'var(--text-muted)',
-          backgroundColor: 'rgba(19, 20, 28, 0.85)',
-          padding: '0.3rem 0.6rem',
-          borderRadius: '6px',
-          border: '1px solid var(--border-subtle)',
-          pointerEvents: 'none',
-        }}
-      >
-        💡 <strong>Space+Drag</strong> or Middle Click to Pan &bull; <strong>Ctrl+V</strong> to Paste Screenshot
-      </div>
-
-      {/* Slide-out Whiteboards Sidebar Drawer */}
-      {isSidebarOpen && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '280px',
-            height: '100%',
-            backgroundColor: 'var(--bg-secondary)',
-            borderRight: '1px solid var(--border-color)',
-            zIndex: 50,
-            display: 'flex',
-            flexDirection: 'column',
-            boxShadow: '4px 0 24px rgba(0, 0, 0, 0.5)',
-          }}
-        >
-          <div
-            style={{
-              padding: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              borderBottom: '1px solid var(--border-subtle)',
-            }}
-          >
-            <h3 style={{ fontSize: '0.95rem', fontWeight: '700', margin: 0 }}>My Whiteboards</h3>
-            <button
-              onClick={() => setIsSidebarOpen(false)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-            >
-              <X size={16} />
-            </button>
-          </div>
-
-          <div style={{ padding: '0.75rem 1rem' }}>
-            <button
-              onClick={handleCreateBoard}
-              className="btn btn-primary"
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.4rem',
-                fontSize: '0.8rem',
-              }}
-            >
-              <Plus size={14} />
-              <span>New Whiteboard</span>
-            </button>
-          </div>
-
-          {/* Boards List */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0 0.5rem' }}>
-            {boards.map((b) => (
-              <div
-                key={b.id}
-                onClick={() => {
-                  loadBoardDetails(b.id);
-                  setIsSidebarOpen(false);
-                }}
-                style={{
-                  padding: '0.65rem 0.75rem',
-                  borderRadius: '6px',
-                  marginBottom: '0.35rem',
-                  cursor: 'pointer',
-                  backgroundColor: b.id === activeBoardId ? 'rgba(37, 99, 235, 0.15)' : 'transparent',
-                  border: b.id === activeBoardId ? '1px solid #2563eb' : '1px solid transparent',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '0.5rem',
-                }}
-              >
-                {editingTitleId === b.id ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flex: 1 }}>
-                    <input
-                      type="text"
-                      value={newTitleInput}
-                      onChange={(e) => setNewTitleInput(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        flex: 1,
-                        padding: '0.2rem 0.4rem',
-                        fontSize: '0.8rem',
-                        backgroundColor: 'var(--bg-primary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '4px',
-                        color: '#ffffff',
-                      }}
-                      autoFocus
-                    />
-                    <button
-                      onClick={(e) => handleSaveRename(b.id, e)}
-                      style={{ background: 'none', border: 'none', color: '#10b981', cursor: 'pointer' }}
-                    >
-                      <Check size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div style={{ overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          fontSize: '0.85rem',
-                          fontWeight: b.id === activeBoardId ? '600' : '400',
-                          color: b.id === activeBoardId ? '#60a5fa' : 'var(--text-primary)',
-                          textOverflow: 'ellipsis',
-                          overflow: 'hidden',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {b.title}
-                      </div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                        {b.element_count} objects
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingTitleId(b.id);
-                          setNewTitleInput(b.title);
-                        }}
-                        title="Rename Board"
-                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-                      >
-                        <Edit2 size={12} />
-                      </button>
-                      <button
-                        onClick={(e) => handleDeleteBoard(b.id, e)}
-                        title="Delete Board"
-                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Main HTML5 Canvas */}
+      {/* ---------------------------------------------------- */}
+      {/* MAIN INTERACTIVE CANVAS                              */}
+      {/* ---------------------------------------------------- */}
       <canvas
         ref={canvasRef}
         onPointerDown={handlePointerDown}
@@ -1811,62 +936,226 @@ export default function WhiteboardPage() {
         onPointerUp={handlePointerUp}
         onWheel={handleWheel}
         style={{
-          display: 'block',
           width: '100%',
           height: '100%',
-          cursor: activeTool === 'pan' ? 'grab' : 'crosshair',
-          touchAction: 'none',
+          display: 'block',
+          cursor:
+            activeTool === 'hand'
+              ? 'grab'
+              : activeTool === 'selection'
+              ? 'default'
+              : activeTool === 'text'
+              ? 'text'
+              : 'crosshair',
         }}
       />
 
-      {/* Inline Textarea when clicking with Text Tool */}
-      {textInput && (
+      {/* ---------------------------------------------------- */}
+      {/* TEXT CREATION MODAL OVERLAY                          */}
+      {/* ---------------------------------------------------- */}
+      {textModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+          }}
+          onClick={() => setTextModal(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '380px',
+              backgroundColor: canvasTheme === 'dark' ? '#1e293b' : '#ffffff',
+              borderRadius: '12px',
+              padding: '1.25rem',
+              boxShadow: '0 12px 32px rgba(0,0,0,0.3)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.85rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Add Handwritten Text</span>
+              <button
+                onClick={() => setTextModal(null)}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#888' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <textarea
+              autoFocus
+              value={textModal.text}
+              onChange={(e) => setTextModal((prev) => ({ ...prev, text: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSaveTextModal();
+                }
+              }}
+              placeholder="Type your handwritten note here... (Enter to place)"
+              style={{
+                width: '100%',
+                minHeight: '90px',
+                padding: '0.65rem',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                fontSize: '1.2rem',
+                fontFamily: "'Caveat', cursive",
+                color: canvasTheme === 'dark' ? '#fff' : '#1e1e1e',
+                backgroundColor: canvasTheme === 'dark' ? '#0f172a' : '#f8fafc',
+                outline: 'none',
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button
+                onClick={() => setTextModal(null)}
+                style={{
+                  padding: '0.4rem 0.8rem',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: 'transparent',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveTextModal}
+                style={{
+                  padding: '0.4rem 1rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: '#6366f1',
+                  color: '#fff',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Place Text ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* BOTTOM-LEFT CONTROLS: Zoom, Undo, Redo, Delete       */}
+      {/* ---------------------------------------------------- */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 16,
+          left: 16,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.35rem',
+          padding: '0.3rem 0.45rem',
+          borderRadius: '10px',
+          backgroundColor: canvasTheme === 'dark' ? '#1e1e1e' : '#ffffff',
+          border: `1px solid ${canvasTheme === 'dark' ? '#333' : '#e2e8f0'}`,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+          zIndex: 40,
+        }}
+      >
+        <button
+          onClick={() => setViewport((prev) => ({ ...prev, zoom: Math.max(0.2, prev.zoom - 0.15) }))}
+          style={{ width: '30px', height: '30px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+          title="Zoom out"
+        >
+          <ZoomOut size={16} />
+        </button>
+        <span style={{ fontSize: '0.75rem', fontWeight: 700, minWidth: '40px', textAlign: 'center' }}>
+          {Math.round(viewport.zoom * 100)}%
+        </span>
+        <button
+          onClick={() => setViewport((prev) => ({ ...prev, zoom: Math.min(4.0, prev.zoom + 0.15) }))}
+          style={{ width: '30px', height: '30px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+          title="Zoom in"
+        >
+          <ZoomIn size={16} />
+        </button>
+
+        <div style={{ width: '1px', height: '18px', backgroundColor: '#e2e8f0', margin: '0 0.2rem' }} />
+
+        <button
+          onClick={handleUndo}
+          style={{ width: '30px', height: '30px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+          title="Undo"
+        >
+          <RotateCcw size={15} />
+        </button>
+        <button
+          onClick={handleRedo}
+          style={{ width: '30px', height: '30px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+          title="Redo"
+        >
+          <RotateCw size={15} />
+        </button>
+
+        {selectedId && (
+          <button
+            onClick={handleDeleteSelected}
+            style={{ width: '30px', height: '30px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#ef4444' }}
+            title="Delete Selected Element"
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
+      </div>
+
+      {/* ---------------------------------------------------- */}
+      {/* DAILY TASKS & NOTEPAD DRAWER                         */}
+      {/* ---------------------------------------------------- */}
+      {isNotepadOpen && (
         <div
           style={{
             position: 'absolute',
-            left: `${textInput.screenX}px`,
-            top: `${textInput.screenY}px`,
-            zIndex: 60,
+            top: 68,
+            right: 16,
+            width: '320px',
+            height: 'calc(100vh - 120px)',
+            backgroundColor: canvasTheme === 'dark' ? '#1e1e1e' : '#ffffff',
+            border: `1px solid ${canvasTheme === 'dark' ? '#333' : '#e2e8f0'}`,
+            borderRadius: '12px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            display: 'flex',
+            flexDirection: 'column',
+            zIndex: 45,
+            padding: '1rem',
           }}
         >
-          <textarea
-            value={textInput.text}
-            onChange={(e) => setTextInput((prev) => ({ ...prev, text: e.target.value }))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                commitText();
-              }
-            }}
-            placeholder="Type your notes here... (Ctrl+Enter to save)"
-            autoFocus
-            rows={4}
-            style={{
-              padding: '0.5rem',
-              backgroundColor: 'rgba(19, 20, 28, 0.95)',
-              color: currentColor,
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-              fontSize: `${fontSize}px`,
-              border: '2px solid #2563eb',
-              borderRadius: '6px',
-              outline: 'none',
-              resize: 'both',
-              minWidth: '220px',
-              minHeight: '80px',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
-            }}
-          />
-          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.3rem' }}>
-            <button onClick={commitText} className="btn btn-primary btn-sm" style={{ fontSize: '0.75rem' }}>
-              Done
-            </button>
-            <button
-              onClick={() => setTextInput(null)}
-              className="btn btn-outline btn-sm"
-              style={{ fontSize: '0.75rem' }}
-            >
-              Cancel
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Daily Tasks</span>
+            <button onClick={() => setIsNotepadOpen(false)} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}>
+              <X size={15} />
             </button>
           </div>
+          <textarea
+            value={quickNotes}
+            onChange={(e) => {
+              setQuickNotes(e.target.value);
+              localStorage.setItem('whiteboard_quick_notes', e.target.value);
+            }}
+            placeholder="Type quick daily notes or reminders..."
+            style={{
+              flex: 1,
+              width: '100%',
+              padding: '0.5rem',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              fontSize: '0.8rem',
+              resize: 'none',
+              outline: 'none',
+            }}
+          />
         </div>
       )}
     </div>

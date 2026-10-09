@@ -257,4 +257,33 @@ export const api = {
     request(`/whiteboard/${encodeURIComponent(boardId)}`, {
       method: 'DELETE',
     }),
+
+  // Permanent Notepad Engine (AI & DSA Workspaces)
+  getNotes: (category, search) => {
+    const query = new URLSearchParams();
+    if (category) query.append('category', category);
+    if (search) query.append('search', search);
+    const qs = query.toString();
+    return request(`/notes${qs ? `?${qs}` : ''}`);
+  },
+
+  getNote: (noteId) => request(`/notes/${encodeURIComponent(noteId)}`),
+
+  createNote: (noteData) =>
+    request('/notes', {
+      method: 'POST',
+      body: JSON.stringify(noteData),
+    }),
+
+  updateNote: (noteId, noteData) =>
+    request(`/notes/${encodeURIComponent(noteId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(noteData),
+    }),
+
+  deleteNote: (noteId) =>
+    request(`/notes/${encodeURIComponent(noteId)}`, {
+      method: 'DELETE',
+    }),
 };
+

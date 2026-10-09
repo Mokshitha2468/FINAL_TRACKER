@@ -132,8 +132,9 @@ export default function DashboardPage() {
             : p
         )
       );
-      // Refresh summary counters
+      // Refresh summary counters and spaced repetition revisions count
       loadSummary();
+      loadRevisionsCount();
     } catch (err) {
       alert(`Error updating problem: ${err.message}`);
     }

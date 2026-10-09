@@ -13,29 +13,33 @@ export default function RevisionsDrawer({ isOpen, onClose, onRevisionUpdated }) 
     setLoading(true);
     try {
       const res = await api.getRevisions(filter);
-      setData(res);
+      setData(res || { stats: {}, revisions: [] });
     } catch (err) {
       console.error('Failed to load revisions:', err);
+      setData({ stats: {}, revisions: [] });
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadRevisions();
-  }, [filter]);
+    if (isOpen) {
+      loadRevisions();
+    }
+  }, [isOpen, filter]);
 
   const handleComplete = async (id) => {
     try {
       await api.completeRevision(id);
-      loadRevisions();
+      await loadRevisions();
       if (onRevisionUpdated) onRevisionUpdated();
     } catch (err) {
       alert(`Error completing revision: ${err.message}`);
     }
   };
 
-  const { stats, revisions } = data;
+  const stats = data?.stats || {};
+  const revisions = Array.isArray(data?.revisions) ? data.revisions : [];
 
   const getRevLabel = (num) => {
     switch (num) {
@@ -203,8 +207,8 @@ export default function RevisionsDrawer({ isOpen, onClose, onRevisionUpdated }) 
                       {rev.scheduled_date} {rev.is_due && '• Due Now'}
                     </span>
 
-                    <span className={`diff-pill diff-pill-${rev.difficulty.toLowerCase()}`} style={{ padding: '0.1rem 0.4rem', fontSize: '0.65rem' }}>
-                      {rev.difficulty}
+                    <span className={`diff-pill diff-pill-${(rev.difficulty || 'Medium').toLowerCase()}`} style={{ padding: '0.1rem 0.4rem', fontSize: '0.65rem' }}>
+                      {rev.difficulty || 'Medium'}
                     </span>
                   </div>
 

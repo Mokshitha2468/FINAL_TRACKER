@@ -188,6 +188,13 @@ def toggle_problem_progress(
             {"_id": current["_id"]},
             {"$set": {"status": "unsolved", "completed_at": None, "updated_at": now}}
         )
+        # Remove any pending uncompleted spaced repetition revisions for this problem
+        db["revision_events"].delete_many({
+            "user_id": user_id,
+            "track": track,
+            "position": position,
+            "is_completed": False,
+        })
         return {
             "track": track,
             "position": position,
